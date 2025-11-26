@@ -211,3 +211,16 @@
 
 (assert (= {:a {:b 7} :c 1} @tree))
 (println "\ntree2:" tree)
+
+;; NOTE:
+;; - ミドルウェア適用、ないし observers を連鎖で仕込むには?
+;;   -  observers を hiccup-like keyword vector に変えて、
+;;      (hook tree [...] [::inc ::mul [::printer [::trigger-some [::func-some]]]]])
+;;      のように、適用する関数チェインを記述する
+;;      簡単のために、引数と返り値は [observer path before after] に固定する
+;;      関数は defonce した reactions (map atom) に assoc していけば良いんじゃないか
+;; - declarative にしたい、或いはデータから自動的に observers をインポートないしデータにエクスポートしたい
+;;   - 現状の observer は中にグローバルの変数があっても良いとしているのでこの部分が不透明
+;;     なので、基本的に作用に必要な変数を変数に渡したいが、そうすると関数の柔軟性が失われる
+;;     逆に、現状 observable を特定のデータ構造内に束縛せずに自由に定義しているのをやめて、
+;;     'metasystem' という単一の map atom に移すことで、 system を固定してしまいパスのみで変数を表現すればどうか
