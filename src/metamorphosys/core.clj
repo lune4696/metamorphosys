@@ -49,68 +49,72 @@
 (defn deactivate! [kw] (swap! reacts dissoc kw))
 
 (defn observable
-  [path] (if (empty? path)
-           (swap! sys #(with-meta % {:memos/observers {} :memos/observed? false}))
-           (swap! sys update-in path #(with-meta % {:memos/observers {} :memos/observed? false}))))
+  [path] (swap! sys update-in path #(with-meta % {:memos/observers {} :memos/observed? false})))
 
 (defn unobservable
-  [path] (if (empty? path)
-           (swap! sys #(vary-meta % dissoc :memos/observers :memos/observed?))
-           (swap! sys update-in path #(vary-meta % dissoc :memos/observers :memos/observed?))))
+  [path] (swap! sys update-in path #(vary-meta % dissoc :memos/observers :memos/observed?)))
 
 (defn observable?
-  [path] (let [m (if (empty? path) (meta @sys) (meta (get-in @sys path)))]
+  [path] (let [m (meta (get-in @sys path))]
            (not (or (nil? (:memos/observers m))
                     (nil? (:memos/observed? m))))))
 
 (defn entity
   [path] (get-in @sys path))
 
+(defn observed? [path]  (:memos/observed? (meta (entity path))))
+
 (defn hook
-  [path k fs] (if (empty? path)
-                 (swap! sys #(vary-meta % assoc-in [:memos/observers k] fs))
-                 (swap! sys update-in path #(vary-meta % assoc-in [:memos/observers k] fs))))
+  [path to reactions]
+  (swap! sys update-in path #(vary-meta % assoc-in [:memos/observers to] reactions)))
 
 (defn unhook
-  [path k] (if (empty? path)
-              (swap! sys #(vary-meta % update-in [:memos/observers] dissoc k))
-              (swap! sys update-in path #(vary-meta % update-in [:memos/observers] dissoc k))))
+  [path to]
+  (swap! sys update-in path #(vary-meta % update-in [:memos/observers] dissoc to)))
 
 (defn unhook-all
-  [path] (if (empty? path)
-           (swap! sys #(vary-meta % assoc-in [:memos/observers] {}))
-           (swap! sys update-in path
-                  #(vary-meta % assoc-in [:memos/observers] {}))))
+  [path] (swap! sys update-in path #(vary-meta % assoc-in [:memos/observers] {})))
 
-(defn compose [ini fns] (reduce (fn [ans f] ((@reacts f) ans)) ini fns))
+(defn chain [ini fns] (reduce (fn [ans f] ((@reacts f) ans)) ini fns))
+
+(defn- make-observed [entt]
+  (vary-meta entt assoc :memos/observed? true))
 
 (defn- -observe! 
-  [path f] (let [old-val (entity path) 
-                 new-val (if (:memos/observed? (meta old-val))
-                           old-val
-                           (if (empty? path)
-                             (do (swap! sys #(vary-meta % assoc :memos/observed? true))
-                                 (swap! sys f))
-                             (do (swap! sys update-in path #(vary-meta % assoc :memos/observed? true))
-                                 (swap! sys update-in path f)
-                                 (entity path))))]
-             (when-not (= old-val new-val)
-               (let [observers (:memos/observers (meta old-val))]
-                 (mapv (fn [[k fs]] (compose [k path old-val new-val] fs)) observers)))
-             (if (empty? path)
-               (swap! sys #(vary-meta % assoc :memos/observed? false))
-               (swap! sys update-in path #(vary-meta % assoc :memos/observed? false)))
-             new-val))
+  [path f] (let [prev (entity path) 
+                 curr (if (:memos/observed? (meta prev))
+                        prev 
+                        (do (swap! sys update-in path make-observed)
+                            (swap! sys update-in path f)
+                            (entity path)))]
+             (when-not (= prev curr)
+               (let [observers (:memos/observers (meta prev))]
+                 (->> observers
+                      (mapv (fn [[to fs]] 
+                              (cond
+                                (not (vector? to)) (chain [to path prev curr] fs)
+                                (and
+                                 (observable? to)
+                                 (not (observed? to))) (->> (chain [to path prev curr] fs)
+                                 (#(-observe!
+                                    to (fn [_] (with-meta % (meta (entity to)))))))
+                                :else nil)))))) 
+             (swap! sys update-in path #(vary-meta % assoc :memos/observed? false))
+             curr))
 
 (defn observe! 
-  [path subpath f] (if-not (observable? path)
-                     :memos/not-observable
-                     (if (nil? (get-in @sys (concat path subpath)))
-                       :memos/not-found
-                       (-observe! path #(update-in % subpath f)))))
+  ([path f]
+   (cond
+     (not (observable? path)) :memos/not-observable
+     (nil? (entity path)) :memos/not-found
+     :else (-observe! path f)))
+  ([path subpath f]
+   (if (nil? (entity (concat path subpath)))
+     :memos/not-found
+     (observe! path #(update-in % subpath f)))))
 
 (defn observes! 
-  [path pairs] (mapv (fn [[subpath f]] (observe! path subpath f)) pairs))
+  [path fs] (mapv (fn [[subpath f]] (observe! path subpath f)) fs))
 
 (defn noop? [x] (or (= :memos/not-observable x) (= :memos/not-found x)))
 
@@ -119,6 +123,6 @@
 (defn op? [x] (not (noop? x)))
 
 (defn printer
-  [[observer path before after]]
-  (println observer ">>" path ":" before "->" after)
-  [observer path before after])
+  [[to from prev curr]]
+  (println to ">>" from ":" prev "->" curr)
+  [to from prev curr])
