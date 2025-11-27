@@ -1,0 +1,9 @@
+#kaocha/v1
+{;; テスト結果を色付けする
+ :color? true
+ ;; テスト結果を TAP 形式で出力する
+ :reporter [kaocha.report/tap]
+ ;; テスト順をランダム化
+ randomize? true
+ ;; 失敗したらテストをその場で終了する
+ :fail-fast? true}
