@@ -2,107 +2,102 @@
   (:require [clojure.test :as test :refer [deftest is]]
             [metamorphosys.core :as me]))
 
-
-(deftest core
+(deftest basic
   (test/testing "all"
-    (let [tree {:a {:b 0} :c 0}]
-      (me/activate! ::printer me/printer)
-      (me/register! [:tree] tree)
-      (println @me/sys)
-      (is (not (me/observable? [:tree :a])))
-      (me/observable [:tree :a])
-      (is (me/observable? [:tree :a]))
-      (is (not (me/observable? [:tree :a :c])))
-      (me/hook [:tree :a] ::print [::printer])
-    
-      (me/activate! ::hoge (fn [v] (println "hoge") v))
-      (me/hook [:tree :a] ::foo [::hoge])
-      (me/unhook [:tree :a] ::foo)
-      (me/deactivate! ::foo)
-    
-      (is (= {:b 1} (me/observe! [:tree :a] [:b] inc)))
-      (is (= :memos/not-observable (me/observe! [:tree :c] inc)))
-      (me/unhook-all [:tree :a])
-      (is (me/op? (me/observe! [:tree :a] [:b] inc)))
-      (me/hook [:tree :a] ::print [::printer])
-      (is (= {:b 3} (me/observe! [:tree :a] [:b] inc)))
-    
-      (me/unobservable [:tree :a])
-      (is (= :memos/not-observable (me/observe! [:tree :a] [:b] inc)))
-      (is (nil? (:memos/observers (me/entity [:tree :a]))))
-      (me/observable [:tree :a])
-      (me/hook [:tree :a] ::print [::printer])
-      (is (= {:b 4}
-             (me/observe! [:tree :a] [:b] inc)
-             (me/entity [:tree :a])))
-      (is (some? (:memos/observers (meta (me/entity [:tree :a])))))
-      (println (str "tree" [:a] ".meta") (->> (me/entity [:tree :a]) meta))
-    
-      (me/unregister! [:tree :a :b])
-      (is (= :memos/not-found (me/observe! [:tree :a] [:b] inc)))
-      (me/register! [:tree :a :b] 0)
-      (is (me/observable? [:tree :a])) ;; メタデータは対象ではなく「位置」に基づいている!
-    
-      (me/unregister! [:tree :a :b])
-    
-      (reset! me/sys {:tree {:a {:b 0} :c 0}})
-      (is (nil? (meta (get-in @me/sys [:tree :a])))) ;; swap! ではメタデータは消えないが、reset! では消える (hard reset)
-      (me/observable [:tree :a])
-      (me/hook [:tree :a] ::print [::printer])
-      (me/observe! [:tree :a] [:b] inc)
-      (println (me/observes! [:tree :a] {[:b] inc
-                                         [:c] inc}))
-      (println (me/observes! [:tree :a] [[[:b] inc]
-                                         [[:b] inc]]))
-    
-      (is (= {:a {:b 4} :c 0} (:tree @me/sys)))
-      (println "\ntree:" (:tree @me/sys))
-    
-      (reset! me/sys {:tree {:a {:b 0} :c {:d 0}}})
-      (me/observable [:tree :a])
-      (me/observable [:tree :c])
-      (me/hook [:tree :a] ::print [::printer])
-      (me/hook [:tree :c] ::print [::printer])
-      (me/activate! ::a->c
-                    (fn [[to _ prev curr]]
-                      (let [c (me/entity to)
-                            d (c :d)]
-                        (if (nil? d)
-                          c
-                          {:d (+ d (- (:b curr) (:b prev)))}))))
-      (me/activate! ::c->a
-                    (fn [[to _ prev curr]]
-                      (let [a (me/entity to)
-                            b (a :b)]
-                        (if (nil? b)
-                          a
-                          {:b (+ (:b (me/entity to))
-                                 (- (:d curr) (:d prev)))}))))
-      (me/hook [:tree :a] [:tree :c] [::a->c])
-      (me/hook [:tree :c] [:tree :a] [::c->a])
+    (let [tree {:a {:b 0} :c 0}
+          sys (me/system! {})]
+      (me/add-action sys ::printer me/printer)
+      (me/assoc-in! sys [:tree] tree)
+      (me/hook sys [[:tree :a :b]] :print [::printer])
 
-      (me/observe! [:tree :c] [:d] inc)
+      (me/add-action sys ::hoge (fn [v] (println "hoge") v))
+      (me/hook sys [[:tree :a]] ::foo [::hoge])
+      (me/unhook sys [[:tree :a :b]] ::foo)
+      (me/unhook sys [[:tree :a]] ::foo) ;; safely nil return
+      (me/del-action sys ::hoge)
 
-      (me/observe! [:tree :a] [:b] inc)
+      (is (some? (me/observe! sys [:tree :a :b] inc)))
+      (me/clear! sys)
+      (is (= 1 (get-in @sys [:tree :a :b])))
 
-      (is (and (= {:b 2} (me/entity [:tree :a]))
-               (= {:d 2} (me/entity [:tree :c]))))
+      (is (some? (me/observe! sys [:tree :c] inc)))
+      (me/clear! sys)
+      (is (= 1 (get-in @sys [:tree :c])))
+
+      (is (nil? (me/observe! sys [:tree :d] inc)))
+      (me/clear! sys)
+
+      (me/unhook-all sys [:tree :a :b])
+
+      (is (some? (me/observe! sys [:tree :a :b] inc)))
+      (is (= 2 (get-in @sys [:tree :a :b])))
+      (is (nil? (me/observe! sys [:tree :a :b] inc)))
+      (is (some? (me/observe! sys [:tree :c] inc)))
+      (me/clear! sys)
+      (is (= 2 (get-in @sys [:tree :a :b])))
+      (is (= 2 (get-in @sys [:tree :c])))
+
+      (me/hook sys [:tree :a :b] :print [::printer])
+
+      (is (some? (me/observe! sys [:tree :a :b] inc)))
+      (me/clear! sys)
+      (is (= 3 (get-in @sys [:tree :a :b])))
+
+      (me/dissoc-in! sys [:tree :a :b])
+
+      (is (nil? (me/observe! sys [:tree :a :b] inc)))
+      (me/clear! sys)
+      (is (= nil (get-in @sys [:tree :a :b])))
+
+      (me/assoc-in! sys [:tree :a :b] 0)
+
+      (is (some? (me/observe! sys [:tree :a :b] inc)))
+      (me/clear! sys)
+      (is (= 1 (get-in @sys [:tree :a :b]))))))
+
+(deftest reaction 
+  (test/testing "all"
+    (let [sys (me/system! {:tree {:a {:b 0} :c {:d 0} :e 0}})]
+      (me/add-action sys ::printer me/printer)
+      (me/add-action sys ::d<-b (fn [[d b]] (+ d b)))
+      (me/add-action sys ::b<-d (fn [[b d]] (+ b d)))
+      (me/add-action sys ::e<-b.d (fn [[_ b d]] (+ b d)))
+      (me/hook sys [[:tree :a :b]] [:tree :c :d] [::printer ::d<-b])
+      (me/hook sys [[:tree :c :d]] [:tree :a :b] [::printer ::b<-d])
+      (me/hook sys
+               (me/syspath [:tree :a :b] [:tree :c :d])
+               [:tree :e] [::printer ::e<-b.d])
+      (me/hook sys
+               (me/syspath [:tree :c :d] [:tree :a :b])
+               [:tree :e] [::printer ::e<-b.d ]) ;; syspath is unique (sorted) path
+
+      (is (some? (me/observe! sys [:tree :a :b] inc)))
+      (me/clear! sys)
+      (is (some? (me/observe! sys [:tree :c :d] inc)))
+      (me/clear! sys)
+      (is (= {:a {:b 3} :c {:d 2} :e 5}
+             (get-in @sys [:tree])))
     
-      (me/unobservable [:tree :c])
-      (me/observe! [:tree :a] [:b] inc)
-      (is (and (= {:b 3} (me/entity [:tree :a]))
-               (= {:d 2} (me/entity [:tree :c]))))
-      (me/observable [:tree :c])
-      (me/observe! [:tree :a] [:b] inc)
-      (is (and (= {:b 4} (me/entity [:tree :a]))
-               (= {:d 3} (me/entity [:tree :c]))))
-      (me/unregister! [:tree :c :d])
-      (me/observe! [:tree :a] [:b] inc)
-      (me/register! [:tree :c :d] (:b (me/entity [:tree :a])))
-      (me/observe! [:tree :a] [:b] inc)
-    
-      (println (me/entity [:tree :a]))
-      (println (me/entity [:tree :c]))
-      (is (and (= {:b 6} (me/entity [:tree :a]))
-               (= {:d 6} (me/entity [:tree :c]))))
-      (println "\ntree:" (:tree @me/sys)))))
+      (me/unhook sys [[:tree :c :d]] [:tree :a :b])
+      (is (some? (me/observe! sys [:tree :c :d] inc)))
+      (me/clear! sys)
+      (is (= {:a {:b 3} :c {:d 3} :e 5}
+             (get-in @sys [:tree])))
+
+      (me/hook sys [[:tree :c :d]] [:tree :a :b] [::printer ::b<-d])
+      (is (some? (me/observe! sys [:tree :c :d] inc)))
+      (me/clear! sys)
+      (is (= {:a {:b 7} :c {:d 4} :e 11}
+             (get-in @sys [:tree])))
+
+      (me/dissoc-in! sys [:tree :a :b])
+      (me/assoc-in! sys [:tree :a :b] 0)
+      (is (= {:a {:b 0} :c {:d 4} :e 11}
+             (get-in @sys [:tree])))
+
+      (is (some? (me/observe! sys [:tree :c :d] inc)))
+      (me/clear! sys)
+      (is (= {:a {:b 5} :c {:d 5} :e 10}
+             (get-in @sys [:tree])))
+      
+      (println "\nsys:" @sys "meta:" (meta @sys)))))

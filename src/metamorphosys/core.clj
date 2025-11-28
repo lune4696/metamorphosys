@@ -1,4 +1,5 @@
-(ns metamorphosys.core)
+(ns metamorphosys.core
+  (:require [clojure.set :refer [union subset?]]))
 
 ;; メタデータの制約によりコレクションしかオブザーバブル化できない = オブザーバーを付与できないのだが、
 ;; clojure における型付きのデータ = collection なので問題ない
@@ -40,89 +41,73 @@
 ;; 3. system の持ち方これでいいの
 ;;   - 正直わからないけど、変更そんなに大変じゃないから良いんじゃないか
  
-(def sys (atom {}))
-(def reacts (atom {}))
+(defn system! [m] (atom (with-meta m {::action {}
+                                      ::observer {}
+                                      ::observed #{}
+                                      ::reacted {}})))
 
-(defn register! [path data] (swap! sys assoc-in path data))
-(defn unregister! [path] (swap! sys update-in (butlast path) dissoc (last path)))
-(defn activate! [kw f] (swap! reacts assoc kw f))
-(defn deactivate! [kw] (swap! reacts dissoc kw))
+(defn action [sys] (-> @sys meta ::action))
+(defn act [sys tag] ((-> sys action) tag))
 
-(defn observable
-  [path] (swap! sys update-in path #(with-meta % {:memos/observers {} :memos/observed? false})))
+(defn assoc-in! [sys path data] (swap! sys assoc-in path data))
+(defn dissoc-in! [sys path] (swap! sys update-in (butlast path) dissoc (last path)))
+(defn add-action [sys name action] (swap! sys vary-meta assoc-in [::action name] action))
+(defn del-action [sys name] (swap! sys vary-meta update-in [::action] dissoc name))
 
-(defn unobservable
-  [path] (swap! sys update-in path #(vary-meta % dissoc :memos/observers :memos/observed?)))
+(defn hook [sys in out reacts] (swap! sys vary-meta assoc-in [::observer in out] reacts))
 
-(defn observable?
-  [path] (let [m (meta (get-in @sys path))]
-           (not (or (nil? (:memos/observers m))
-                    (nil? (:memos/observed? m))))))
+(defn unhook [sys in out] (swap! sys vary-meta update-in [::observer in] dissoc out))
+(defn unhook-all [sys in] (swap! sys vary-meta assoc-in [::observer in] {}))
 
-(defn entity
-  [path] (get-in @sys path))
+(defn- observed [sys paths] (swap! sys vary-meta update ::observed #(union % (set paths))))
+(defn observed? [sys paths] (subset? (set paths) (-> @sys meta ::observed)))
 
-(defn observed? [path]  (:memos/observed? (meta (entity path))))
+(defn- reacted [sys paths] (swap! sys vary-meta assoc-in [::reacted paths] nil))
+(defn reacted? [sys paths] (contains? (-> @sys meta ::reacted) paths))
 
-(defn hook
-  [path to reactions]
-  (swap! sys update-in path #(vary-meta % assoc-in [:memos/observers to] reactions)))
+(defn syspath [& args] (vec (sort args)))
 
-(defn unhook
-  [path to]
-  (swap! sys update-in path #(vary-meta % update-in [:memos/observers] dissoc to)))
-
-(defn unhook-all
-  [path] (swap! sys update-in path #(vary-meta % assoc-in [:memos/observers] {})))
-
-(defn chain [ini fns] (reduce (fn [ans f] ((@reacts f) ans)) ini fns))
-
-(defn- make-observed [entt]
-  (vary-meta entt assoc :memos/observed? true))
+(defn- fns? [coll] (reduce (fn [acc in] (and acc (fn? in))) coll))
 
 (defn- -observe! 
-  [path f] (let [prev (entity path) 
-                 curr (if (:memos/observed? (meta prev))
-                        prev 
-                        (do (swap! sys update-in path make-observed)
-                            (swap! sys update-in path f)
-                            (entity path)))]
-             (when-not (= prev curr)
-               (let [observers (:memos/observers (meta prev))]
-                 (->> observers
-                      (mapv (fn [[to fs]] 
-                              (cond
-                                (not (vector? to)) (chain [to path prev curr] fs)
-                                (and
-                                 (observable? to)
-                                 (not (observed? to))) (->> (chain [to path prev curr] fs)
-                                 (#(-observe!
-                                    to (fn [_] (with-meta % (meta (entity to)))))))
-                                :else nil)))))) 
-             (swap! sys update-in path #(vary-meta % assoc :memos/observed? false))
-             curr))
+  [sys in]
+  (when-let [effects ((-> @sys meta ::observer) in)]
+    (when (and (observed? sys in) 
+               (not (reacted? sys in)))
+      (reacted sys in)
+      (let [argv (mapv #(get-in @sys %) in)]
+        (mapv (fn [[out reacts]]
+                (let [arg (if (vector? out)
+                            (get-in @sys out)
+                            out)
+                      acts (mapv #(act sys %) reacts)]
+                  (when (and (some? arg)
+                             (fns? acts)
+                             (not (observed? sys [out])))
+                    (if (vector? out)
+                      (do
+                        (observed sys [out])
+                        (swap! sys update-in out #(concat [%] argv))
+                        (swap! sys update-in out (apply comp (reverse acts))))
+                      ((apply comp (reverse acts)) (concat [arg] argv))))))
+              effects))
+      (mapv #(-observe! sys %) (-> @sys meta ::observer keys)))))
 
 (defn observe! 
-  ([path f]
-   (cond
-     (not (observable? path)) :memos/not-observable
-     (nil? (entity path)) :memos/not-found
-     :else (-observe! path f)))
-  ([path subpath f]
-   (if (nil? (entity (concat path subpath)))
-     :memos/not-found
-     (observe! path #(update-in % subpath f)))))
+  [sys path f]
+   (when (and (some? (get-in @sys path))
+              (not (observed? sys [path]))
+              (not (reacted? sys [path])))
+     (observed sys [path])
+     (swap! sys update-in path f)
+     (-observe! sys [path])
+     true))
 
-(defn observes! 
-  [path fs] (mapv (fn [[subpath f]] (observe! path subpath f)) fs))
-
-(defn noop? [x] (or (= :memos/not-observable x) (= :memos/not-found x)))
-
-
-
-(defn op? [x] (not (noop? x)))
+(defn clear! [sys]
+  (swap! sys vary-meta assoc ::observed #{})
+  (swap! sys vary-meta assoc ::reacted {}))
 
 (defn printer
-  [[to from prev curr]]
-  (println to ">>" from ":" prev "->" curr)
-  [to from prev curr])
+  [[out & args :as all]]
+  (println out (if (vector? out) "<<" "::") args)
+  all)
