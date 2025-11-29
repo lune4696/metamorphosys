@@ -18,6 +18,15 @@ Metamorphosys applies this principle to system management:
 | **Nexus** | [nexus][2] | add-watch atom → compute between atom |
 | **Metamorphosys** | [Quantum Measurement][3] | observe! system → reactions |
 
+Metamorphosys is:
+
+- **Just (Meta) Data** : System is map atom, its info is metadata of the system.
+- **For Rapid Prototyping** : Minimal concepts, functions (LOC: 300 (logic: ~100!)).
+- **For FOSS Game Dev** : Native multiple inputs, flexible triggering.
+- **For Something New** : Just models reactive system, no premise and dependency.
+
+All function input/output type is specified by using [malli][4]
+
 ### Core Principles
 
 1. **Centralized State**: State is just a map atom (= `system`)
@@ -48,29 +57,25 @@ Metamorphosys applies this principle to system management:
    ;; Fires when all :player/:positions,:stamina :walls/:positions are observed
 ```
 
-All function input/output type is specified by using [malli][4]
-
 ## Comparison
-
-Metamorphosys is:
-
-- **Just (Meta) Data** : System is map atom, its info is metadata of the system.
-- **Rapid Prototyping** : Minimal concepts, functions (LOC: 300 (logic: ~100!)).
-- **FOSS Game Dev** : Native multiple inputs, flexible triggering.
-- **Something New** : Just models reactive system, no premise and dependency.
 
 ### vs Re-frame?
 
 Basically, metamorphosys is just a reactive system model.
-That means
+Thus it's a little bit inaccurate to compare it against [Re-frame][6],
+but here are some comparison...
 
-**Trade-offs** : Strictness vs Minimalism:
+**Strictness vs Minimalism**
 - ❌ No built-in time-travel
 - ✅ Simpler mental model
 - ✅ Universal path indexing
 - ✅ Flexible triggering (timing, input/output args)
 
 ### vs Nexus
+
+[Nexus][7] is a small, zero-dependency library for dispatching actions, 
+it's purpose is similar to metamorphosys.
+But there're some differences between two...
 
 **Nexus** : Automatic reaction between atom caused by value change:
 ```clojure
@@ -139,11 +144,11 @@ See [core.cljc](src/metamorphosys/core.cljc) docstrings.
 
 ## Acknowledments
 
-Designed by [lune4696](https://github.com/lune4696)
+Designed by [lune]([@lune4696](https://github.com/lune4696)).
 
 ## Change Log
 
-This change log consults [keepachangelog.com][5].
+This change log basically follows [keepachangelog.com][5].
 
 ### 0.1.0 - 2025-11-29
 
@@ -159,3 +164,5 @@ Copyright © 2025 Christian Johansen, Magnar Sveen, and Teodor Heggelund. Distri
 [3]:https://en.wikipedia.org/wiki/Measurement_in_quantum_mechanics
 [4]:https://github.com/metosin/malli
 [5]:https://keepachangelog.com/
+[6]:https://github.com/day8/re-frame
+[7]:https://github.com/cjohansen/nexus
