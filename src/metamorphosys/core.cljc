@@ -313,7 +313,7 @@
     (observes! sys path)
     :success))
 
-(defn recover!
+(defn recover
   "clear *sys*'s observe/react state and recover *sys to be re-observed* 
 
   Once you `observe!` some `path`, path and its precedant observers
@@ -321,7 +321,7 @@
   Those information are stored in *sys*'s metadata to wait next user input 
   and prevent observer's double-call. 
   So, when all inputs from outside *sys* are processed,
-  user must call `recover!` to clean up the information.
+  user must call `recover` to clean up the information.
   Typically, user will call it at the end of frame or tick or any equivalent.
   Though it's not recommended, user can modify those info by your hand
   to avoid state recovering.
