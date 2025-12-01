@@ -7,10 +7,10 @@ Models **event-driven reactive system** in a tiny .cljc file, using clojure meta
 {:deps {metamorphosys/core {:mvn/version "0.1.0"}}}
 ```
 
-## Philosophy: 観測が状態を更新する (Observation updates state)
+## Model: 観測による状態の自動更新 (chain-reaction of state update by observation)
 
-In quantum mechanics, system observation changes its state. 
-Metamorphosys applies this principle to system management:
+In quantum mechanics, system observation automatically changes its state.
+Metamorphosys is inspired from this to implement reactive system management.
 
 | Library | Metaphor | Example |
 |----------|----------|---------|
@@ -18,12 +18,11 @@ Metamorphosys applies this principle to system management:
 | **Nexus** | [nexus][2] | add-watch atom → compute between atom |
 | **Metamorphosys** | [Quantum Measurement][3] | observe! system → reactions |
 
-Metamorphosys is:
+Metamorphosys helps:
 
-- **Just (Meta) Data** : System is map atom, its info is metadata of the system.
-- **For Rapid Prototyping** : Minimal concepts, functions (LOC: 300 (logic: ~100!)).
-- **For FOSS Game Dev** : Native multiple inputs, flexible triggering.
-- **For Something New** : Just models reactive system, no premise and dependency.
+- **Prototyping** : Tiny model (300 LOC), system is just a map atom w/ metadata.
+- **Game Dev** : Scalable multiple inputs, flexible triggering.
+- **Something New** : Just models reactive system, no premise and dependency.
 
 All function input/output type is specified by using [malli][4]
 
@@ -51,15 +50,15 @@ All function input/output type is specified by using [malli][4]
 ```clojure
    (hook 
      sys 
-     (to-paths [:player :positions] [:player :stamina] [:walls :positions]) 
+     [:player :positions] 
      [:can-run?] 
-     [:has-stamina? :collision?])
-   ;; Fires when all :player/:positions,:stamina :walls/:positions are observed
+     [:has-stamina? :collision?]
+     [[:player :stamina] [:walls :positions]])
 ```
 
 ## Comparison
 
-### vs Re-frame?
+### vs Re-frame
 
 Basically, metamorphosys is just a reactive system model.
 Thus it's a little bit inaccurate to compare it against [Re-frame][6],
@@ -97,7 +96,7 @@ But there're some differences between two...
 
   (add-action sys ::check-death (fn [dead? hp] (<= hp 0))) ;; add an action
   (hook sys 
-        [[:player :hp]] 
+        [:player :hp] 
         [:player :dead?] 
         [::check-death]) ;; hook state observer :hp --[::check-death]-> :dead?
 
@@ -144,7 +143,7 @@ See [core.cljc](src/metamorphosys/core.cljc) docstrings.
 
 ## Acknowledments
 
-Designed by [lune]([@lune4696](https://github.com/lune4696)).
+Designed by [lune]()([@lune4696](https://github.com/lune4696)).
 
 ## Change Log
 

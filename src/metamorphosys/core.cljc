@@ -13,28 +13,24 @@
 
 (def SysAtom
   "schema: access path against `system`"
-  [:fn (fn [x] (and (= (type (atom x)) (type x))
+  [:fn (fn [x] (and (= (type (atom {})) (type x))
                     (m/validate SysMap @x)))])
 
 (def Path
   "schema: access path against `system`"
   [:vector {:min 1} :any])
 
-(def Pathable
-  "schema: access path against `system`"
-  [:or Path :keyword])
-
 (def Paths
   "schema: access paths against `system`"
   [:vector {:min 1} Path])
 
 (def Act
-  "schema: `system`'s action function
+  "schema: `system`'s (pure) action function
 
-  Input must be single vector, whose minimal length is 1."
-  [:=> [:cat [:sequential {:min 1} :any]] :any])
+  Input must be single seq, whose minimal length is 2 (1 out, 1+ in(s))."
+  [:=> [:cat [:sequential {:min 2} :any]] :any])
 
-(def Action
+(def Actions
   "schema: `system`'s action"
   [:map-of :keyword Act])
 
@@ -42,17 +38,25 @@
   "schema: `observer`'s reaction"
   [:vector {:min 1} :keyword])
 
+(def PathKw
+  "schema: index against `observer`"
+  [:or Path :keyword])
+
 (def Observer
   "schema: `system`'s observer"
-  [:map-of Paths [:map-of Pathable Reaction]])
+  [:map-of PathKw [:map [:paths [:vector Path]] [:reaction Reaction]]])
+
+(def Observers
+  "schema: `system`'s observers (map)"
+  [:map-of Path Observer])
 
 (def Observed
   "schema: `system`'s observed `path` pool"
   [:set Path])
 
-(def Reacted
-  "schema: `system`'s reacted `observer` list (map)"
-  [:map-of Paths :any])
+(def Triggered
+  "schema: `system`'s triggered `path` queue"
+  [:sequential Path])
 
 (defn system
   "initalize system from map *m*
@@ -66,30 +70,40 @@
   This path representation and its interaction is core functionality of this library."
   {:malli/schema [:=> [:cat SysMap] SysAtom]}
   
-  [m] (atom (with-meta m {::action {}
-                          ::observer {}
+  [m] (atom (with-meta m {::actions {}
+                          ::observers {}
                           ::observed #{}
-                          ::reacted {}})))
+                          ::triggered []})))
 
-(defn get-action
-  "get actions map of *sys*"
-  {:malli/schema [:=> [:cat SysAtom] Action]}
-  [sys] (-> @sys meta ::action))
+(defn get-actions
+  "get actions (kw-act map) of *sys*"
+  {:malli/schema [:=> [:cat SysAtom] Actions]}
+  [sys] (-> @sys meta ::actions))
+
+(defn get-act
+  "get *kw* act from *sys*'s `actions`"
+  {:malli/schema [:=> [:cat SysAtom :keyword] Act]}
+  [sys kw] ((get-actions sys) kw))
+
+(defn get-observers
+  "get observers of *sys*"
+  {:malli/schema [:=> [:cat SysAtom] Observers]}
+  [sys] (-> @sys meta ::observers))
 
 (defn get-observer
-  "get observers map of *sys*"
-  {:malli/schema [:=> [:cat SysAtom] Observer]}
-  [sys] (-> @sys meta ::observer))
+  "get *sys*'s observer against *in* path (if any)"
+  {:malli/schema [:=> [:cat SysAtom Path] [:or Observer :nil]]}
+  [sys in] ((get-observers sys) in))
 
 (defn get-observed
   "get observed path set of *sys*"
   {:malli/schema [:=> [:cat SysAtom] Observed]}
   [sys] (-> @sys meta ::observed))
 
-(defn get-reacted
-  "get reacted path map of *sys*"
-  {:malli/schema [:=> [:cat SysAtom] Reacted]}
-  [sys] (-> @sys meta ::reacted))
+(defn get-triggered
+  "get triggered path queue of *sys*"
+  {:malli/schema [:=> [:cat SysAtom] Triggered]}
+  [sys] (-> @sys meta ::triggered))
 
 (defn assoc-in!
   "assoc *data* in *sys* at *path*
@@ -123,7 +137,7 @@
   "add *act* as *kw* to *sys*'s `action`
 
   Note:
-  - *act* args should be `[[out & ins]]` (1 output, 0~ inputs)
+  - *act* args should be `[[out in & others]]` (1 out, 1+ in(s))
   - *act* should be pure function against *sys*
     - side effect against outside *sys* is totally fine (c.f. `printer`)
 
@@ -139,7 +153,7 @@
 
   Now system can call/apply *act* against *kw* in `reaction`."
   {:malli/schema [:=> [:cat SysAtom :keyword Act] :any]}
-  [sys kw act] (swap! sys vary-meta assoc-in [::action kw] act))
+  [sys kw act] (swap! sys vary-meta assoc-in [::actions kw] act))
 
 (defn del-action
   "delete *kw*'s act from *sys*'s `action`
@@ -155,95 +169,86 @@
 
   Now system cannot call/apply *act* against *kw* in `reaction`."
   {:malli/schema [:=> [:cat SysAtom :keyword] :any]}
-  [sys kw] (swap! sys vary-meta update-in [::action] dissoc kw))
+  [sys kw] (swap! sys vary-meta update-in [::actions] dissoc kw))
 
 (defn hook
-  "hook *sys*'s observer: *in-paths* --[*reaction*]--> *out-path*
+  "hook *sys*'s observer: *in* (+ *paths*) --[*reaction*]--> *out*
 
   Note:
-  - *in-paths* is a *reaction* chain's input path vector (= `paths`).
-  - *out-path* is a *reaction* chain's output `path`.
-  - *reaction* is a `action` keyword vector.
+  - *in* is a input `path` of *reaction* chain.
+  - *out* is a output path of *reaction* chain.
+  - *reaction* is a keyword vector represents what `action` will occur.
+  - *paths* is a path vector used as reference inputs of *reaction* chain.
   - composed reaction will be pure against *sys*, because action are so.
 
   Example:
   ```
-  (let [sys (system {:tree {:a {:b 0} :c {:d 0}}})]
+  (let [sys (system {:tree {:a {:b 0} :c {:d 0} :e 0}})]
     (add-action sys :printer printer)
-    (add-action sys :d<-b (fn [[d b]] (+ d b)))
-    (hook sys [[:tree :c :d]] [:tree :a :b] [:printer :b<-d])
+    (add-action sys :e<-b+d (fn [[e b d]] (+ b d)))
+    (hook sys [:tree :a :b] [:tree :e] [:printer :e<-b+d] [[:tree :c :d]])
     (get-observer sys))
-  ;; => {[[:tree :c :d]] {[:tree :a :b] [:printer :b<-d]}}
+  ;; => {[:tree :a :b] {[:tree :e] {:args [[:tree :c :d]]
+                                    :reaction [:printer :e<-b+d]}}}
   ```
  
-  When ALL paths in *in-paths* are observed, *reaction* executes.
-  This enables multi-input derived values (like spreadsheet formulas).
+  1 vs 1 relation between in-out is essential for scalable cascade model.
+  If you want true multi-input (like spreadsheet formulas), make multiple hooks.
 
   Now user/system can trigger `observer` and dependency graph by `observe!`."
-  {:malli/schema [:=> [:cat SysAtom Paths Pathable Reaction] :any]}
-  [sys in-paths out-path reaction]
-  (swap! sys vary-meta assoc-in [::observer in-paths out-path] reaction))
+  {:malli/schema [:function
+                  [:=> [:cat SysAtom Path PathKw Reaction] :any]
+                  [:=> [:cat SysAtom Path PathKw Reaction Paths] :any]]}
+  ([sys in out reaction]
+   (swap! sys vary-meta assoc-in [::observers in out] {:paths []
+                                                       :reaction reaction}))
+  ([sys in out reaction paths]
+   (swap! sys vary-meta assoc-in [::observers in out] {:paths paths
+                                                       :reaction reaction})))
 
 (defn unhook
   "unhook observer(s) from *sys* 
 
   Note:
-  - 1-arity: Unhook ALL observers from *in-paths*
-  - 2-arity: Unhook specific *in-paths* → *out-path* observer
+  - 1-arity: Unhook observer against *in* completely
+  - 2-arity: Unhook specific *out* from observer against *in* 
 
   Example:
   ```
-  (let [sys (system {:tree {:a {:b 0}}})]
-    (hook sys [[:tree :c :d]] [:tree :a :b] [:printer :b<-d])
-    (hook sys [[:tree :c :d]] [:tree :e :f] [:printer :b<-d])
-    (unhook sys [[:tree :c :d]] [:tree :a :b])
+  (let [sys (system {:tree {:a {:b 0} :c {:d 0}}})]
+    (hook sys [:tree :a :b] [:tree :c :d] [:printer :d<-b])
+    (hook sys [:tree :a :b] [:tree :e :f] [:printer :f<-b])
+    (unhook sys [:tree :e :f] [:tree :a :b])
     (get-observer sys))
-  ;; => {[[:tree :c :d]] {[:tree :a :b] [:printer :b<-d]}}
+  ;; => {[:tree :a :b] {[:tree :c :d] [:printer :d<-b]}}
   ```
 
-  Now user/system cannot trigger *observer* and dependency graph by *observe!*."
+  Now user/system can no longer trigger *observer* and cascade by *observe!*."
   {:malli/schema [:function
-                  [:=> [:cat SysAtom Paths] :any]
-                  [:=> [:cat SysAtom Paths Pathable] :any]]}
-  ([sys in-paths]
-   (swap! sys vary-meta assoc-in [::observer in-paths] {}))
-  ([sys in-paths out-path]
-   (swap! sys vary-meta update-in [::observer in-paths] dissoc out-path)))
-
-(defn to-paths
-  "turn path *args* into unique (sorted) `paths`
-
-  Example:
-  ```
-  (to-paths [:a] [:b])
-  ;; => [[:a] [:b]]
-  (to-paths [:b] [:a])
-  ;; => [[:a] [:b]]
-  ```
-  This ensures `hook` uniqueness regardless of *args* order,
-  thus prevent duplicated registration of multiple input's hook."
-  {:malli/schema [:=> [:cat [:* Path]] Paths]}
-  [& args] (vec (sort args)))
+                  [:=> [:cat SysAtom Path] :any]
+                  [:=> [:cat SysAtom Path PathKw] :any]]}
+  ([sys in] (swap! sys vary-meta update-in [::observers] dissoc in))
+  ([sys in out] (swap! sys vary-meta update-in [::observers in] dissoc out)))
 
 (defn observed?
-  "check *sys*'s *paths*'s observer is observed"
-  {:malli/schema [:=> [:cat SysAtom Paths] :boolean]}
-  [sys paths] (subset? (set paths) (get-observed sys)))
-
-(defn reacted?
-  "check *sys*'s *paths*'s observer is reacted"
-  {:malli/schema [:=> [:cat SysAtom Paths] :boolean]}
-  [sys paths] (contains? (get-reacted sys) paths))
+  "check *sys*'s *path*' observer is observed"
+  {:malli/schema [:=> [:cat SysAtom Path] :boolean]}
+  [sys path] (subset? (set [path]) (get-observed sys)))
 
 (defn- observed
-  "make it observed to *sys*'s *paths*'s observer"
-  {:malli/schema [:=> [:cat SysAtom Paths] :any]}
-  [sys paths] (swap! sys vary-meta update ::observed #(union % (set paths))))
+  "make it observed to *sys*'s *path* observer"
+  {:malli/schema [:=> [:cat SysAtom PathKw] :any]}
+  [sys path] (swap! sys vary-meta update ::observed #(union % (set [path]))))
 
-(defn- reacted
-  "make it reacted to *sys*'s *paths*'s observer"
-  {:malli/schema [:=> [:cat SysAtom Paths] :any]}
-  [sys paths] (swap! sys vary-meta assoc-in [::reacted paths] nil))
+(defn- triggered
+  "add *path* to *sys*'s `triggered` observer queue"
+  {:malli/schema [:=> [:cat SysAtom Path] :any]}
+  [sys path] (swap! sys vary-meta update ::triggered #(conj % path)))
+
+(defn- release
+  "release a first `path` from *sys*'s `triggered` path queue"
+  {:malli/schema [:=> [:cat SysAtom Path] :any]}
+  [sys] (swap! sys vary-meta update ::triggered rest))
 
 (defn- fns?
   "check all of the *coll*'s elements are function"
@@ -251,44 +256,39 @@
   [coll] (reduce (fn [acc in] (and acc (fn? in))) coll))
 
 (defn- observes! 
-  "*sys*'s internal observation against *in-paths*
+  "*sys*'s internal observation against *in* `path`
 
-  Recursively called until there is no `observed` but non-`reacted` observer.
-  - Observer is regarded as observed when all *in-paths* are (in) observed."
-  {:malli/schema [:=> [:cat SysAtom Paths] :any]}
-  [sys in-paths]
-  (when-let [reactions ((get-observer sys) in-paths)]
-    (reacted sys in-paths)
-    (let [argv (mapv #(get-in @sys %) in-paths)]
-      (mapv (fn [[out reacts]]
-              (let [arg (if (vector? out)
-                          (get-in @sys out)
-                          out)
-                    acts (mapv #((get-action sys) %) reacts)]
-                (when (and (some? arg)
-                           (fns? acts)
-                           (if (vector? out)
-                             (not (observed? sys [out]))
-                             true))
-                  (if (vector? out)
-                    (do
-                      (observed sys [out])
-                      (swap! sys update-in out #(concat [%] argv))
-                      (swap! sys update-in out (apply comp (reverse acts))))
-                    ((apply comp (reverse acts)) (concat [arg] argv))))))
-            reactions))
-    (when-let [paths (first (filter #(and (observed? sys %)
-                                          (not (reacted? sys %)))
-                                    (keys (get-observer sys))))]
-      (recur sys paths))))
+  Recursively called until all `triggered` paths are `observed`.
+  = *sys*'s `triggered` queue becomes empty"
+  {:malli/schema [:=> [:cat SysAtom Path] :any]}
+  [sys in]
+  (when vector? (observed sys in))
+  (when-let [observer (get-observer sys in)] 
+    (mapv (fn [[out {:keys [paths reaction]}]]
+            (let [arg (if (vector? out) (get-in @sys out) out)
+                  argv (mapv #(get-in @sys %) (cons in paths))
+                  reacts (cons #(cons % argv)
+                               (map #(get-act sys %) reaction))]
+              (when (and (some? arg)
+                         (fns? reacts)
+                         (or (keyword? out)
+                             (not (observed? sys out)))) 
+                (if (vector? out)
+                  (do (triggered sys out)
+                      (swap! sys update-in out (apply comp (reverse reacts))))
+                  ((apply comp (reverse reacts)) arg)))))
+          observer))
+  (when-let [path (first (get-triggered sys))]
+    (release sys)
+    (recur sys path)))
 
 (defn observe! 
   "`sys`'s external observation aganinst [`path`],
-  trigger internal observation dependency graph
+  trigger internal observation cascade 
 
   Note: Returns :success on success, nil on failure...
   - given `path` does not exist in `sys`.
-  - given [`path`] is already observed (or reacted).
+  - given `path` is already observed (or reacted).
 
   Example:
   ```
@@ -304,15 +304,13 @@
   This is the PRIMARY way to modify system state reactively.
   Direct `swap!` bypasses observation and breaks the dependency chain."
   {:malli/schema [:=>
-                  [:cat SysAtom Pathable [:=> [:cat :any] :any]]
+                  [:cat SysAtom Path [:=> [:cat :any] :any]]
                   [:or :keyword :nil]]}
   [sys path f]
   (when (and (some? (get-in @sys path))
-             (not (observed? sys [path]))
-             (not (reacted? sys [path])))
-    (observed sys [path])
+             (not (observed? sys path)))
     (swap! sys update-in path f)
-    (observes! sys [path])
+    (observes! sys path)
     :success))
 
 (defn recover!
@@ -329,7 +327,7 @@
   to avoid state recovering.
   But in that case, user should consider launch another `system`."
   {:malli/schema [:=> [:cat SysAtom] :any]}
-  [sys] (swap! sys vary-meta assoc ::observed #{} ::reacted {}))
+  [sys] (swap! sys vary-meta assoc ::observed #{} ::reacted []))
 
 (defn printer
   "example *action*: print given args and pass all args to next"
