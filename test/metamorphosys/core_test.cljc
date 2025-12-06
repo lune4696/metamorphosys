@@ -25,42 +25,42 @@
       (me/unhook sys [:tree :a] ::foo) ;; safely nil return
       (me/del-action sys ::hoge)
 
-      (is (some? (me/observe! sys [:tree :a :b] inc)))
+      (is (= :success (me/observe! sys [:tree :a :b] inc)))
       (me/recover sys)
       (is (= 1 (get-in @sys [:tree :a :b])))
 
-      (is (some? (me/observe! sys [:tree :c] inc)))
+      (is (= :success (me/observe! sys [:tree :c] inc)))
       (me/recover sys)
       (is (= 1 (get-in @sys [:tree :c])))
 
-      (is (nil? (me/observe! sys [:tree :d] inc)))
+      (is (= :nil (me/observe! sys [:tree :d] inc)))
       (me/recover sys)
 
       (me/unhook sys [:tree :a :b])
 
-      (is (some? (me/observe! sys [:tree :a :b] inc)))
+      (is (= :success (me/observe! sys [:tree :a :b] inc)))
       (is (= 2 (get-in @sys [:tree :a :b])))
-      (is (nil? (me/observe! sys [:tree :a :b] inc)))
-      (is (some? (me/observe! sys [:tree :c] inc)))
+      (is (= :observed (me/observe! sys [:tree :a :b] inc)))
+      (is (= :success (me/observe! sys [:tree :c] inc)))
       (me/recover sys)
       (is (= 2 (get-in @sys [:tree :a :b])))
       (is (= 2 (get-in @sys [:tree :c])))
 
       (me/hook sys [:tree :a :b] :print [::printer])
 
-      (is (some? (me/observe! sys [:tree :a :b] inc)))
+      (is (= :success (me/observe! sys [:tree :a :b] inc)))
       (me/recover sys)
       (is (= 3 (get-in @sys [:tree :a :b])))
 
       (me/dissoc-in! sys [:tree :a :b])
 
-      (is (nil? (me/observe! sys [:tree :a :b] inc)))
+      (is (= :nil (me/observe! sys [:tree :a :b] inc)))
       (me/recover sys)
       (is (= nil (get-in @sys [:tree :a :b])))
 
       (me/assoc-in! sys [:tree :a :b] 0)
 
-      (is (some? (me/observe! sys [:tree :a :b] inc)))
+      (is (= :success (me/observe! sys [:tree :a :b] inc)))
       (me/recover sys)
       (is (= 1 (get-in @sys [:tree :a :b]))))))
 
@@ -71,7 +71,7 @@
     (mi/instrument!)
     (dev/start! {:report (pretty/reporter)})
 
-    (let [sys (me/system {:tree {:a {:b 0} :c {:d 0} :e 0}})]
+    (let [sys (me/system {:tree {:a {:b 0} :c {:d 0}}})]
       (me/add-action sys ::printer me/printer)
       (me/add-action sys ::d<-b (fn [[d b]] (+ d b)))
       (me/add-action sys ::b<-d (fn [[b d]] (+ b d)))
@@ -80,34 +80,29 @@
       (me/hook sys [:tree :c :d] [:tree :a :b] [::printer ::b<-d])
       (me/hook sys [:tree :a :b] [:tree :e] [::printer ::e<-b.d] [[:tree :c :d]])
 
-      (is (some? (me/observe! sys [:tree :a :b] inc)))
+      (is (= :success (me/observe! sys [:tree :a :b] inc)))
       (me/recover sys)
-      (is (some? (me/observe! sys [:tree :c :d] inc)))
+      (is (= :success (me/observe! sys [:tree :c :d] inc)))
       (me/recover sys)
-      (is (= {:a {:b 3} :c {:d 2} :e 5}
-             (get-in @sys [:tree])))
+      (is (= {:a {:b 3} :c {:d 2} :e 5} (get-in @sys [:tree])))
     
       (me/unhook sys [:tree :c :d] [:tree :a :b])
-      (is (some? (me/observe! sys [:tree :c :d] inc)))
+      (is (= :success (me/observe! sys [:tree :c :d] inc)))
       (me/recover sys)
-      (is (= {:a {:b 3} :c {:d 3} :e 5}
-             (get-in @sys [:tree])))
+      (is (= {:a {:b 3} :c {:d 3} :e 5} (get-in @sys [:tree])))
 
       (me/hook sys [:tree :c :d] [:tree :a :b] [::printer ::b<-d])
-      (is (some? (me/observe! sys [:tree :c :d] inc)))
+      (is (= :success (me/observe! sys [:tree :c :d] inc)))
       (me/recover sys)
-      (is (= {:a {:b 7} :c {:d 4} :e 11}
-             (get-in @sys [:tree])))
+      (is (= {:a {:b 7} :c {:d 4} :e 11} (get-in @sys [:tree])))
 
       (me/dissoc-in! sys [:tree :a :b])
       (me/assoc-in! sys [:tree :a :b] 0)
-      (is (= {:a {:b 0} :c {:d 4} :e 11}
-             (get-in @sys [:tree])))
+      (is (= {:a {:b 0} :c {:d 4} :e 11} (get-in @sys [:tree])))
 
-      (is (some? (me/observe! sys [:tree :c :d] inc)))
+      (is (= :success (me/observe! sys [:tree :c :d] inc)))
       (me/recover sys)
-      (is (= {:a {:b 5} :c {:d 5} :e 10}
-             (get-in @sys [:tree])))
+      (is (= {:a {:b 5} :c {:d 5} :e 10} (get-in @sys [:tree])))
       
       (println "\nsys:" @sys "meta:" (meta @sys)))))
 
@@ -210,38 +205,7 @@
 
       (me/observe! sys [:player :hanako :hand] (fn [_] :paper))
       (is (= :draw (get-in @sys [:taro-vs-hanako])))
-      (me/recover sys)
-      )))
-
-(deftest readme
-  (test/testing "all"
-    (mi/collect!)
-    (mi/instrument!)
-    (dev/start! {:report (pretty/reporter)})
-
-    (let [sys (me/system {:window {:x 800 :y 450}})] ;; initialize system 
-      (me/assoc-in! sys [:player] {:hp 1 :dead? false}) ;; add state as you like it
-      (println @sys) ;; => {:window {:x 800 :y 450}, :player {:hp 1 :dead? false}}
-
-      (me/add-action sys ::check-death (fn [[dead? hp]] (<= hp 0))) ;; add an action
-      (me/hook sys 
-               [:player :hp] 
-               [:player :dead?] 
-               [::check-death]) ;; hook state observer :hp --[::check-death]-> :dead?
-
-      (me/observe! sys [:player :hp] dec) ;; observation fires observer and player died
-      (println (get-in @sys [:player :dead?]))    ;; => true 
-      (println (get-in @sys [:player :hp])) ;; => 0
-
-      (me/observe! sys [:player :hp] inc) ;; NOT fired, because path is already observed
-      (println (get-in @sys [:player :dead?]))    ;; => true
-      (println (get-in @sys [:player :hp])) ;; => 0
-
-      (me/recover sys) ;; system recovered
-
-      (me/observe! sys [:player :hp] inc) ;; Fires and resurrect [:player] !
-      (println (get-in @sys [:player :dead?])) ;; => false
-      (println (get-in @sys [:player :hp])))))
+      (me/recover sys))))
 
 (mc/collect *ns*)
 (mc/emit!)

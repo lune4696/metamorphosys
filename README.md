@@ -218,6 +218,12 @@ Designed by [lune]()([@lune4696](https://github.com/lune4696)).
 
 This change log basically follows [keepachangelog.com][5].
 
+### 0.1.1 - 2025-12-07
+
+Changed
+- enable the observation output against not existing key
+- changed observe! output from #{:success nil} to #{:success :nil :observed}
+
 ### 0.1.0 - 2025-12-01
 
 Added

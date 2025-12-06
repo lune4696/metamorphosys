@@ -269,7 +269,7 @@
                   argv (mapv #(get-in @sys %) (cons in paths))
                   reacts (cons #(cons % argv)
                                (map #(get-act sys %) reaction))]
-              (when (and (some? arg)
+              (when (and 
                          (fns? reacts)
                          (or (keyword? out)
                              (not (observed? sys out)))) 
@@ -303,15 +303,14 @@
   ```
   This is the PRIMARY way to modify system state reactively.
   Direct `swap!` bypasses observation and breaks the dependency chain."
-  {:malli/schema [:=>
-                  [:cat SysAtom Path [:=> [:cat :any] :any]]
-                  [:or :keyword :nil]]}
+  {:malli/schema [:=> [:cat SysAtom Path [:=> [:cat :any] :any]] :keyword]}
   [sys path f]
-  (when (and (some? (get-in @sys path))
-             (not (observed? sys path)))
-    (swap! sys update-in path f)
-    (observes! sys path)
-    :success))
+  (cond
+    (nil? (get-in @sys path)) :nil
+    (observed? sys path) :observed
+    :else (do (swap! sys update-in path f)
+              (observes! sys path)
+              :success)))
 
 (defn recover
   "clear *sys*'s observe/react state and recover *sys to be re-observed* 
