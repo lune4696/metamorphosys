@@ -12,12 +12,12 @@ Models **event-driven reactive system** in a tiny .cljc file, using clojure meta
 
 **After published to Clojars**
 ```clojure
-{:deps {metamorphosys/core {:mvn/version "0.1.0"}}}
+{:deps {metamorphosys/core {:mvn/version "0.2.0"}}}
 ```
 
 **For now**
 ```clojure
-{:deps {io.github.lune4696/metamorphosys {:git/tag "v0.1.0" :git/sha "..."}}}
+{:deps {io.github.lune4696/metamorphosys {:git/tag "v0.2.0" :git/sha "..."}}}
 ```
 
 **Or clone locally:**
@@ -25,7 +25,7 @@ Models **event-driven reactive system** in a tiny .cljc file, using clojure meta
 git clone https://github.com/lune4696/metamorphosys
 ```
 
-## Concepts: 観測による状態の自動更新 (Observation triggered state auto-update)
+## Concepts: 観測による反応性状態更新 (Observation triggered reactive state update)
 
 In quantum mechanics, system observation automatically changes its state.
 Metamorphosys is inspired from this to implement reactive system management.
@@ -89,10 +89,10 @@ All function input/output type is specified by using [malli][4], thus you can ea
 
 ### Quick Overview
 
-| | Reagent | Re-frame | Nexus | Metamorphosys |
-|---|---|---|---|---|
-| **Type** | React wrapper | Full framework | Derived atoms | Reactive system |
-| **State** | ratoms | Single DB | Multiple atoms | system (map atom) |
+| | Reagent | Nexus | Metamorphosys |
+|---|---|---|---|
+| **Type** | React wrapper | Derived atoms | Reactive system |
+| **State** | ratoms | Multiple atoms | system (map atom) |
 
 ### vs Reagent
 
@@ -101,26 +101,9 @@ System in metamorphosys is conceptually inspired by [Reagent][8]'s atom and curs
 - **Reagent**: Automatic reactivity via React rendering
 - **Metamorphosys**: Explicit reactivity via `observe!` (just clojure data and function)
 
-Metamorphosys can be seen as Reagent **disentangled from** hiccup-like 
-markup and browser rendering, enabling use in non-UI contexts like 
+You can think metamorphosys as Reagent **disentangled from** hiccup-like 
+markup and browser rendering, enabling to use in non-UI contexts like 
 game logic, simulations, or workflow engines.
-
-### vs Re-frame
-
-Basically, metamorphosys is just a reactive system model library.
-Thus it's a little bit inaccurate to compare it against [Re-frame][6],
-a feature-complete web framework. But here are some comparison...
-
-**What metamorphosys focuses**
-- ✅ Just (meta) data (you can use any data type as long as it's indexable)
-- ✅ Use it with anything you want (logging, rendering, ...)
-- ✅ Universal path indexing ([:character :foo :health :poison?])
-- ✅ Flexible triggering (timing, input/output args)
-
-**What metamorphosys NOT focuses**
-- ❌ Built-in time-travel
-- ❌ Strong connection with React 
-- ❌ Strict purity
 
 ### vs Nexus
 
@@ -144,23 +127,13 @@ But there're some differences between two...
 ```clojure
 ;; Define all state as a system (= map atom)
 (let [sys (system {:hp 1 :stamina 10 :dead? false})] ;; initialize system 
-  (add-action sys :die? (fn [[dead? hp]] (<= hp 0))) ;; add an action
-  (hook sys [:hp] [:dead?] [:die?]) ;; hook observer :hp --[:die?]-> :dead?
-  ;; [:dead?] path is just a data => *reaction UPDATES data*
+  (hook sys (fn [[dead? hp]] (<= hp 0)) [:hp] [:dead?]) ;; hook observer 
 
   (observe! sys [:hp] dec) ;; observation fires observer and player died
-  (println (get-in @sys [:dead?]))    ;; => true 
-  (println (get-in @sys [:hp])) ;; => 0
-
-  (observe! sys [:hp] inc) ;; NOT fired, because path is already observed
-  (println (get-in @sys [:dead?]))    ;; => true
-  (println (get-in @sys [:hp])) ;; => 0
-
-  (recover sys) ;; system recovered
+  (println @sys) ;; => {:hp 0 :stamina 10 :dead? true}
 
   (observe! sys [:hp] inc) ;; Fires and resurrect [:player] !
-  (println (get-in @sys [:dead?])) ;; => false
-  (println (get-in @sys [:hp]))) ;; => 1
+  (println @sys) ;; => {:hp 1 :stamina 10 :dead? false}
 ```
 
 Basically, nexus aims to provide automatic computation between atoms, while metamorphosys aims to provide reactive system (= map atom).
@@ -170,19 +143,17 @@ Basically, nexus aims to provide automatic computation between atoms, while meta
 ```clojure
 (require '[metamorphosys.core :as me])
 
-;; 1. Create system
-(def sys (me/system {:counter 0}))
-(me/assoc-in! sys [:result] 0) ;; => {:counter 0, :result 0}
+;; 1. Initialize system 
+(let [sys (me/->sys {:counter 0})]
+  (me/assoc-in! sys [:result] 0) ;; => {:counter 0, :result 0}
 
-;; 2. Define action
-(me/add-action sys :double (fn [[_ in]] (* 2 in))) ;; args: [out, in0, in1, ...]
+  ;; 2. Hook observer
+  (me/hook sys (fn [[_ in]] (* 2 in)) [:counter] [:result]) ;; fn, from, to 
 
-;; 3. Hook observer
-(me/hook sys [:counter] [:result] [:double]) ;; in, out, reaction [kw0, kw1, ...]
-
-;; 4. Observe!
-(me/observe! sys [:counter] inc) ;; => :success
-(me/recover sys) ;; => {:counter 1, :result 2} (= @sys)
+  ;; 3. Observe!
+  (me/observe! sys [:counter] inc) ;; => :success
+  @sys)
+;; => {:counter 1, :result 2}
 ```
 
 **Key points:**
@@ -217,6 +188,13 @@ Designed by [lune]()([@lune4696](https://github.com/lune4696)).
 ## Change Log
 
 This change log basically follows [keepachangelog.com][5].
+
+### 0.2.0 - 2025-12-10
+
+Changed
+- fn tables are omitted
+- observe!
+- changed observe! output from #{:success nil} to #{:success :nil :observed}
 
 ### 0.1.1 - 2025-12-07
 
